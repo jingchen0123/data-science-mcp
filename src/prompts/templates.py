@@ -10,14 +10,14 @@ from typing import List, Dict, Any, Union
 # The MCP instance will be initialized by the main server module
 mcp = None
 
-def analyze_dataset(dataset_name: str) -> str:
+def analyze_dataset(dataset_path: str) -> str:
     """
     Create a prompt for comprehensive dataset analysis.
     
     Args:
-        dataset_name: Name of the dataset to analyze
+        dataset_path: Path to the dataset to analyze (absolute or relative to DATA_DIR)
     """
-    return f"""I would like you to help me analyze the dataset '{dataset_name}'. 
+    return f"""I would like you to help me analyze the dataset at '{dataset_path}'. 
 Please help me understand:
 
 1. The basic structure and content of the dataset
@@ -30,17 +30,17 @@ and plot_scatter to explore the data. Feel free to suggest specific analyses tha
 be valuable for this dataset."""
 
 
-def explore_relationship(dataset_name: str, variable1: str, variable2: str) -> List[base.Message]:
+def explore_relationship(dataset_path: str, variable1: str, variable2: str) -> List[base.Message]:
     """
     Create a guided conversation to explore the relationship between two variables.
     
     Args:
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
         variable1: First variable name
         variable2: Second variable name
     """
     return [
-        base.UserMessage(f"I want to understand the relationship between {variable1} and {variable2} in my dataset {dataset_name}."),
+        base.UserMessage(f"I want to understand the relationship between {variable1} and {variable2} in my dataset at {dataset_path}."),
         base.AssistantMessage(f"I'll help you explore the relationship between {variable1} and {variable2}. Let me first check the correlation between them."),
         base.UserMessage("Please also create a scatter plot and explain what you observe.")
     ]
@@ -60,20 +60,20 @@ def data_science_assistant() -> str:
 6. **Data Cleaning**: Suggest and implement data cleaning techniques
 
 What would you like to do with your data today? If you have a specific dataset in mind, 
-please let me know its name (e.g., "customer_data.csv") so I can help you analyze it effectively."""
+please let me know its path (e.g., "/path/to/your/data/customer_data.csv") so I can help you analyze it effectively."""
 
 
-def data_cleaning_workflow(dataset_name: str) -> List[base.Message]:
+def data_cleaning_workflow(dataset_path: str) -> List[base.Message]:
     """
     Create a guided conversation for data cleaning.
     
     Args:
-        dataset_name: Name of the dataset to clean
+        dataset_path: Path to the dataset to clean (absolute or relative to DATA_DIR)
     """
     return [
-        base.UserMessage(f"I need to clean the dataset {dataset_name} before analysis. Please help me with this process."),
+        base.UserMessage(f"I need to clean the dataset at {dataset_path} before analysis. Please help me with this process."),
         
-        base.AssistantMessage(f"""I'll help you clean the dataset {dataset_name}. Let's start with a thorough data quality assessment to identify issues that need addressing.
+        base.AssistantMessage(f"""I'll help you clean the dataset at {dataset_path}. Let's start with a thorough data quality assessment to identify issues that need addressing.
 
 I'll use the `check_data_quality` tool to get a comprehensive assessment."""),
         
@@ -93,14 +93,14 @@ Would you like me to help implement any of these steps? We can take them one by 
     ]
 
 
-def feature_engineering_guide(dataset_name: str) -> str:
+def feature_engineering_guide(dataset_path: str) -> str:
     """
     Create a prompt for feature engineering guidance.
     
     Args:
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
     """
-    return f"""I'd like to perform feature engineering on my dataset {dataset_name} to improve its analytical value.
+    return f"""I'd like to perform feature engineering on my dataset at {dataset_path} to improve its analytical value.
 
 Please help me with:
 
@@ -114,16 +114,16 @@ Before suggesting specific feature engineering steps, please analyze the current
 of the dataset to understand what would be most valuable."""
 
 
-def explain_correlation(dataset_name: str, variable1: str, variable2: str) -> str:
+def explain_correlation(dataset_path: str, variable1: str, variable2: str) -> str:
     """
     Create a prompt for explaining correlations between variables.
     
     Args:
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
         variable1: First variable name
         variable2: Second variable name
     """
-    return f"""I've noticed a correlation between {variable1} and {variable2} in my dataset {dataset_name}.
+    return f"""I've noticed a correlation between {variable1} and {variable2} in my dataset at {dataset_path}.
 
 Could you help me understand:
 
@@ -136,18 +136,18 @@ Could you help me understand:
 Please use appropriate tools to calculate and visualize the correlation."""
 
 
-def interpret_visualization(visualization_type: str, variables: List[str], dataset_name: str) -> str:
+def interpret_visualization(visualization_type: str, variables: List[str], dataset_path: str) -> str:
     """
     Create a prompt for interpreting a visualization.
     
     Args:
         visualization_type: Type of visualization (e.g., histogram, scatter plot)
         variables: Variables included in the visualization
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
     """
     variables_str = ", ".join(variables)
     
-    return f"""I've created a {visualization_type} of {variables_str} from my dataset {dataset_name}.
+    return f"""I've created a {visualization_type} of {variables_str} from my dataset at {dataset_path}.
 
 Could you help me interpret what this visualization shows? Specifically:
 
@@ -160,14 +160,14 @@ Could you help me interpret what this visualization shows? Specifically:
 Please generate the {visualization_type} first using the appropriate tool so you can provide a specific interpretation."""
 
 
-def statistical_test_advisor(dataset_name: str) -> str:
+def statistical_test_advisor(dataset_path: str) -> str:
     """
     Create a prompt for recommending appropriate statistical tests.
     
     Args:
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
     """
-    return f"""I'm working with the dataset {dataset_name} and would like advice on which statistical tests would be appropriate for my analysis.
+    return f"""I'm working with the dataset at {dataset_path} and would like advice on which statistical tests would be appropriate for my analysis.
 
 Please help me understand:
 
@@ -180,24 +180,24 @@ Please help me understand:
 Before recommending specific tests, please analyze the dataset to understand its characteristics."""
 
 
-def modeling_workflow(dataset_name: str, target_variable: str) -> List[base.Message]:
+def modeling_workflow(dataset_path: str, target_variable: str) -> List[base.Message]:
     """
     Create a guided conversation for a modeling workflow.
     
     Args:
-        dataset_name: Name of the dataset
+        dataset_path: Path to the dataset (absolute or relative to DATA_DIR)
         target_variable: Target variable for modeling
     """
     return [
-        base.UserMessage(f"I want to build a predictive model for {target_variable} using my dataset {dataset_name}. Please guide me through the process."),
+        base.UserMessage(f"I want to build a predictive model for {target_variable} using my dataset at {dataset_path}. Please guide me through the process."),
         
-        base.AssistantMessage(f"""I'll help you build a predictive model for {target_variable} using {dataset_name}. Let's start by exploring the dataset and understanding the target variable.
+        base.AssistantMessage(f"""I'll help you build a predictive model for {target_variable} using the dataset at {dataset_path}. Let's start by exploring the dataset and understanding the target variable.
 
 First, I'll use the `explore_data` tool to get a comprehensive overview of the dataset."""),
         
         base.UserMessage("Thanks for the exploration. What preprocessing steps should I take before modeling?"),
         
-        base.AssistantMessage(f"""Based on the exploration of {dataset_name}, here are the preprocessing steps I recommend before modeling {target_variable}:
+        base.AssistantMessage(f"""Based on the exploration of the dataset at {dataset_path}, here are the preprocessing steps I recommend before modeling {target_variable}:
 
 1. Handle missing values in the dataset
 2. Encode categorical variables appropriately
@@ -229,8 +229,8 @@ def initialize(mcp_instance: FastMCP):
         fn=analyze_dataset,
         description="Create a prompt for comprehensive dataset analysis",
         arguments=[{
-            "name": "dataset_name",
-            "description": "Name of the dataset to analyze",
+            "name": "dataset_path",
+            "description": "Path to the dataset to analyze (absolute or relative to DATA_DIR)",
             "required": True
         }]
     ))
@@ -241,8 +241,8 @@ def initialize(mcp_instance: FastMCP):
         description="Create a guided conversation to explore the relationship between two variables",
         arguments=[
             {
-                "name": "dataset_name",
-                "description": "Name of the dataset",
+                "name": "dataset_path",
+                "description": "Path to the dataset (absolute or relative to DATA_DIR)",
                 "required": True
             },
             {
@@ -269,8 +269,8 @@ def initialize(mcp_instance: FastMCP):
         fn=data_cleaning_workflow,
         description="Create a guided conversation for data cleaning",
         arguments=[{
-            "name": "dataset_name",
-            "description": "Name of the dataset to clean",
+            "name": "dataset_path",
+            "description": "Path to the dataset to clean (absolute or relative to DATA_DIR)",
             "required": True
         }]
     ))
@@ -280,8 +280,8 @@ def initialize(mcp_instance: FastMCP):
         fn=feature_engineering_guide,
         description="Create a prompt for feature engineering guidance",
         arguments=[{
-            "name": "dataset_name",
-            "description": "Name of the dataset",
+            "name": "dataset_path",
+            "description": "Path to the dataset (absolute or relative to DATA_DIR)",
             "required": True
         }]
     ))
@@ -292,8 +292,8 @@ def initialize(mcp_instance: FastMCP):
         description="Create a prompt for explaining correlations between variables",
         arguments=[
             {
-                "name": "dataset_name",
-                "description": "Name of the dataset",
+                "name": "dataset_path",
+                "description": "Path to the dataset (absolute or relative to DATA_DIR)",
                 "required": True
             },
             {
@@ -325,8 +325,8 @@ def initialize(mcp_instance: FastMCP):
                 "required": True
             },
             {
-                "name": "dataset_name",
-                "description": "Name of the dataset",
+                "name": "dataset_path",
+                "description": "Path to the dataset (absolute or relative to DATA_DIR)",
                 "required": True
             }
         ]
@@ -337,8 +337,8 @@ def initialize(mcp_instance: FastMCP):
         fn=statistical_test_advisor,
         description="Create a prompt for recommending appropriate statistical tests",
         arguments=[{
-            "name": "dataset_name",
-            "description": "Name of the dataset",
+            "name": "dataset_path",
+            "description": "Path to the dataset (absolute or relative to DATA_DIR)",
             "required": True
         }]
     ))
@@ -349,8 +349,8 @@ def initialize(mcp_instance: FastMCP):
         description="Create a guided conversation for a modeling workflow",
         arguments=[
             {
-                "name": "dataset_name",
-                "description": "Name of the dataset",
+                "name": "dataset_path",
+                "description": "Path to the dataset (absolute or relative to DATA_DIR)",
                 "required": True
             },
             {

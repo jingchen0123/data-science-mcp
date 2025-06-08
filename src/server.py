@@ -6,6 +6,7 @@ This file initializes the MCP server and registers all tools and prompts.
 from mcp.server.fastmcp import FastMCP, Context, Image
 import os
 from pathlib import Path
+import inspect  # Move this import up with other imports
 
 # Import modules
 import tools.data_loading as data_loading
@@ -13,6 +14,8 @@ import tools.exploration as exploration
 import tools.visualization as visualization
 import tools.processing as processing
 import tools.code_generation as code_generation
+import tools.statistical_tests as statistical_tests
+import tools.document_generation as document_generation
 import prompts.templates as templates
 
 # Create an MCP server
@@ -31,7 +34,25 @@ exploration.initialize(mcp, DATA_DIR)
 visualization.initialize(mcp, DATA_DIR)
 processing.initialize(mcp, DATA_DIR)
 code_generation.initialize(mcp, DATA_DIR)
+statistical_tests.initialize(mcp, DATA_DIR)
+document_generation.initialize(mcp, DATA_DIR)
 templates.initialize(mcp)
+
+# Patch tools from each module
+for module_name, module in [
+    ("data_loading", data_loading), 
+    ("exploration", exploration),
+    ("visualization", visualization), 
+    ("processing", processing),
+    ("code_generation", code_generation),
+    ("statistical_tests", statistical_tests)  # Add this module to the patching list
+]:
+    for name, obj in inspect.getmembers(module):
+        if callable(obj) and not name.startswith('_'):
+            # Check if it's a tool function registered with MCP
+            if hasattr(obj, '__self__') and isinstance(obj.__self__, FastMCP):
+                # Replace the original function with the patched version
+                setattr(module, name, document_generation.patch_tool(obj, module_name))
 
 # Create example data
 def create_example_data():

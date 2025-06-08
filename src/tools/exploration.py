@@ -37,33 +37,56 @@ def initialize(mcp_instance: FastMCP, data_dir: Path):
     mcp_instance.add_tool(check_data_quality)
 
 
+def resolve_file_path(file_path: str, ensure_extension: str = None) -> Path:
+    """
+    Resolve a file path, supporting both relative (to DATA_DIR) and absolute paths.
+    
+    Args:
+        file_path: File path or name
+        ensure_extension: Optional extension to add if missing (e.g. '.csv')
+        
+    Returns:
+        Resolved Path object
+    """
+    path = Path(file_path)
+    
+    # If only a filename was provided (no parent directory or relative path), use DATA_DIR
+    if not path.is_absolute() and (not path.parent or str(path.parent) == '.'):
+        resolved_path = DATA_DIR / path.name
+    else:
+        # Use the provided path as is (absolute or relative to current directory)
+        resolved_path = path
+    
+    # Ensure filename has the specified extension
+    if ensure_extension and not resolved_path.name.lower().endswith(ensure_extension.lower()):
+        resolved_path = Path(f"{resolved_path}{ensure_extension}")
+    
+    return resolved_path
 
-def explore_data(filename: str, sample_rows: int = 5) -> str:
+
+def explore_data(file_path: str, sample_rows: int = 5) -> str:
     """
     Perform preliminary data exploration and quality assessment on a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         sample_rows: Number of sample rows to display (default: 5)
         
     Returns:
         Comprehensive data exploration report
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found in the data directory."
+        return f"Error: File {filepath} not found."
     
     try:
         # Load the data
         df = pd.read_csv(filepath)
         
         # Prepare the exploration report
-        report = f"# Preliminary Data Exploration: {filename}\n\n"
+        report = f"# Preliminary Data Exploration\n\n"
+        report += f"**File Path**: {filepath}\n\n"
         
         # === Basic Dataset Characteristics ===
         report += "## 1. Basic Dataset Characteristics\n\n"
@@ -110,55 +133,18 @@ def explore_data(filename: str, sample_rows: int = 5) -> str:
             report += f"#### Numeric Columns\n"
             report += f"```\n{df[numeric_cols].describe().to_string()}\n```\n\n"
         
-        # # For categorical/object columns
-        # cat_cols = df.select_dtypes(exclude=['number']).columns
-        # if len(cat_cols) > 0:
-        #     report += f"#### Categorical Columns\n"
-        #     for col in cat_cols:
-        #         value_counts = df[col].value_counts().head(5)
-        #         unique_count = df[col].nunique()
-        #         report += f"- **{col}**: {unique_count:,} unique values\n"
-        #         report += f"  Top values: "
-        #         report += ", ".join([f"'{val}' ({count:,})" for val, count in value_counts.items()])
-        #         report += "\n"
-        #     report += "\n"
-            
         # For categorical/object columns
         cat_cols = df.select_dtypes(exclude=['number']).columns
         if len(cat_cols) > 0:
             report += f"#### Categorical Columns\n"
             for col in cat_cols:
-                # Include null values in the counts
-                value_counts = df[col].value_counts(dropna=False).head(5)
+                value_counts = df[col].value_counts().head(5)
                 unique_count = df[col].nunique()
-                total_rows = len(df)  # Total number of rows including nulls
-                null_count = df[col].isnull().sum()  # Count of null values
-                
-                report += f"- **{col}**: {unique_count:,} unique values"
-                
-                # Add null information if there are nulls
-                if null_count > 0:
-                    null_pct = (null_count / total_rows) * 100
-                    report += f", {null_count:,} null values ({null_pct:.1f}%)"
-                    
-                report += f"\n  Top values: "
-                
-                # Format each value with count and percentage
-                formatted_values = []
-                for val, count in value_counts.items():
-                    # Handle null values specially
-                    if pd.isna(val):
-                        val_str = "NULL"
-                    else:
-                        val_str = f"'{val}'"
-                        
-                    pct = (count / total_rows) * 100
-                    formatted_values.append(f"{val_str} ({count:,}, {pct:.1f}%)")
-                    
-                report += ", ".join(formatted_values)
+                report += f"- **{col}**: {unique_count:,} unique values\n"
+                report += f"  Top values: "
+                report += ", ".join([f"'{val}' ({count:,})" for val, count in value_counts.items()])
                 report += "\n"
-            report += "\n"           
-            
+            report += "\n"
         
         # === Data Quality Check ===
         report += "## 2. Data Quality Assessment\n\n"
@@ -354,31 +340,27 @@ def explore_data(filename: str, sample_rows: int = 5) -> str:
         return f"Error during data exploration: {str(e)}"
 
 
-
-def describe_dataset(filename: str) -> str:
+def describe_dataset(file_path: str) -> str:
     """
     Generate descriptive statistics for a dataset.
     
     Args:
-        filename: Name of the CSV file to analyze
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         
     Returns:
         Descriptive statistics of the dataset
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     try:
         df = pd.read_csv(filepath)
         
         # Create a comprehensive summary
-        result = f"# Dataset Summary: {filename}\n\n"
+        result = f"# Dataset Summary\n\n"
+        result += f"**File Path**: {filepath}\n\n"
         
         # Basic info
         result += f"## Basic Information\n"
@@ -423,26 +405,21 @@ def describe_dataset(filename: str) -> str:
         return f"Error analyzing dataset: {str(e)}"
 
 
-
-def get_columns_info(filename: str, columns: List[str] = None) -> str:
+def get_columns_info(file_path: str, columns: List[str] = None) -> str:
     """
     Get detailed information about specific columns in a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         columns: List of column names to analyze (if None, analyzes all columns)
         
     Returns:
         Detailed information about the specified columns
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     try:
         df = pd.read_csv(filepath)
@@ -456,7 +433,8 @@ def get_columns_info(filename: str, columns: List[str] = None) -> str:
             if missing_cols:
                 return f"Error: Columns not found in dataset: {', '.join(missing_cols)}"
         
-        result = f"# Column Information: {filename}\n\n"
+        result = f"# Column Information\n\n"
+        result += f"**File Path**: {filepath}\n\n"
         
         for col in columns:
             result += f"## {col}\n\n"
@@ -567,27 +545,22 @@ def get_columns_info(filename: str, columns: List[str] = None) -> str:
         return f"Error analyzing columns: {str(e)}"
 
 
-
-def detect_outliers(filename: str, columns: List[str] = None, method: str = "iqr") -> str:
+def detect_outliers(file_path: str, columns: List[str] = None, method: str = "iqr") -> str:
     """
     Detect outliers in a dataset using various methods.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         columns: List of column names to analyze (if None, analyzes all numeric columns)
         method: Method to use for outlier detection ('iqr', 'zscore', or 'both')
         
     Returns:
         Detailed report of outliers found
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     # Validate method
     valid_methods = ["iqr", "zscore", "both"]
@@ -611,7 +584,8 @@ def detect_outliers(filename: str, columns: List[str] = None, method: str = "iqr
         if not columns:
             return "No numeric columns found in the dataset."
         
-        result = f"# Outlier Detection Report: {filename}\n\n"
+        result = f"# Outlier Detection Report\n\n"
+        result += f"**File Path**: {filepath}\n\n"
         
         # Track total outliers
         total_outliers = {}
@@ -728,30 +702,26 @@ def detect_outliers(filename: str, columns: List[str] = None, method: str = "iqr
         return f"Error detecting outliers: {str(e)}"
 
 
-
-def check_data_quality(filename: str) -> str:
+def check_data_quality(file_path: str) -> str:
     """
     Perform a comprehensive data quality check on a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         
     Returns:
         Detailed data quality report with scores
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     try:
         df = pd.read_csv(filepath)
         
-        result = f"# Data Quality Assessment: {filename}\n\n"
+        result = f"# Data Quality Assessment\n\n"
+        result += f"**File Path**: {filepath}\n\n"
         
         # Define quality dimensions and initialize scores
         quality_scores = {

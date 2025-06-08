@@ -1,13 +1,14 @@
 """
-Visualization tools for the Data Science MCP.
-This module contains tools for creating various data visualizations.
+Data visualization tools for the Data Science MCP.
+This module contains tools for creating various visualizations from datasets.
 """
 
 from mcp.server.fastmcp import FastMCP, Context, Image
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from io import BytesIO
+import seaborn as sns
+import io
 from pathlib import Path
 import os
 from typing import Optional, Dict, List, Any, Union
@@ -37,15 +38,42 @@ def initialize(mcp_instance: FastMCP, data_dir: Path):
     mcp_instance.add_tool(plot_line)
     mcp_instance.add_tool(plot_correlation_matrix)
     mcp_instance.add_tool(plot_box)
+    mcp_instance.add_tool(get_correlation)
 
 
+def resolve_file_path(file_path: str, ensure_extension: str = None) -> Path:
+    """
+    Resolve a file path, supporting both relative (to DATA_DIR) and absolute paths.
+    
+    Args:
+        file_path: File path or name
+        ensure_extension: Optional extension to add if missing (e.g. '.csv')
+        
+    Returns:
+        Resolved Path object
+    """
+    path = Path(file_path)
+    
+    # If only a filename was provided (no parent directory or relative path), use DATA_DIR
+    if not path.is_absolute() and (not path.parent or str(path.parent) == '.'):
+        resolved_path = DATA_DIR / path.name
+    else:
+        # Use the provided path as is (absolute or relative to current directory)
+        resolved_path = path
+    
+    # Ensure filename has the specified extension
+    if ensure_extension and not resolved_path.name.lower().endswith(ensure_extension.lower()):
+        resolved_path = Path(f"{resolved_path}{ensure_extension}")
+    
+    return resolved_path
 
-def plot_scatter(filename: str, x_column: str, y_column: str, color_column: str = None, title: str = None) -> Image:
+
+def plot_scatter(file_path: str, x_column: str, y_column: str, color_column: str = None, title: str = None) -> Image:
     """
     Create a scatter plot of two columns from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         x_column: Column to plot on x-axis
         y_column: Column to plot on y-axis
         color_column: Column to use for point colors (optional)
@@ -54,83 +82,60 @@ def plot_scatter(filename: str, x_column: str, y_column: str, color_column: str 
     Returns:
         A scatter plot image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
         # Check if columns exist
         if x_column not in df.columns:
-            raise ValueError(f"Column '{x_column}' not found in dataset.")
+            return f"Error: Column '{x_column}' not found in {filepath}."
         if y_column not in df.columns:
-            raise ValueError(f"Column '{y_column}' not found in dataset.")
+            return f"Error: Column '{y_column}' not found in {filepath}."
         if color_column and color_column not in df.columns:
-            raise ValueError(f"Column '{color_column}' not found in dataset.")
+            return f"Error: Color column '{color_column}' not found in {filepath}."
         
-        # Create plot
+        # Create the plot
         plt.figure(figsize=(10, 6))
         
         if color_column:
-            # Create colored scatter plot
-            if pd.api.types.is_numeric_dtype(df[color_column]):
-                scatter = plt.scatter(df[x_column], df[y_column], c=df[color_column], cmap='viridis', alpha=0.7)
-                plt.colorbar(scatter, label=color_column)
-            else:
-                # For categorical color column
-                categories = df[color_column].unique()
-                for category in categories:
-                    subset = df[df[color_column] == category]
-                    plt.scatter(subset[x_column], subset[y_column], label=category, alpha=0.7)
-                plt.legend()
+            scatter = plt.scatter(df[x_column], df[y_column], c=df[color_column], 
+                                 cmap='viridis', alpha=0.7)
+            plt.colorbar(scatter, label=color_column)
         else:
             plt.scatter(df[x_column], df[y_column], alpha=0.7)
         
-        # Add title and labels
-        if title:
-            plt.title(title)
-        else:
-            plt.title(f"{y_column} vs {x_column}")
-        
+        # Set labels and title
         plt.xlabel(x_column)
         plt.ylabel(y_column)
+        plt.title(title if title else f"Scatter Plot: {x_column} vs {y_column}")
         plt.grid(True, alpha=0.3)
-        
-        # Calculate correlation
-        correlation = df[x_column].corr(df[y_column])
-        plt.annotate(f"Correlation: {correlation:.4f}", xy=(0.05, 0.95), xycoords='axes fraction', 
-                     fontsize=10, bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8))
-        
-        # Improve layout
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating scatter plot: {str(e)}")
+        plt.close()
+        return f"Error creating scatter plot: {str(e)}"
 
 
-
-def plot_histogram(filename: str, column: str, bins: int = 20, kde: bool = False, title: str = None) -> Image:
+def plot_histogram(file_path: str, column: str, bins: int = 20, kde: bool = False, title: str = None) -> Image:
     """
     Create a histogram of a column from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         column: Column to plot histogram for
         bins: Number of bins (default: 20)
         kde: Whether to overlay a kernel density estimate (default: False)
@@ -139,82 +144,59 @@ def plot_histogram(filename: str, column: str, bins: int = 20, kde: bool = False
     Returns:
         A histogram image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
         # Check if column exists
         if column not in df.columns:
-            raise ValueError(f"Column '{column}' not found in dataset.")
+            return f"Error: Column '{column}' not found in {filepath}."
         
-        # Create plot
+        # Check if column is numeric
+        if not pd.api.types.is_numeric_dtype(df[column]):
+            return f"Error: Column '{column}' is not numeric."
+        
+        # Create the plot
         plt.figure(figsize=(10, 6))
         
-        # Plot histogram
-        n, bins, patches = plt.hist(df[column].dropna(), bins=bins, alpha=0.7, density=kde)
-        
-        # Add KDE if requested
         if kde:
-            from scipy import stats
-            kde_x = np.linspace(df[column].min(), df[column].max(), 1000)
-            kde_y = stats.gaussian_kde(df[column].dropna())(kde_x)
-            plt.plot(kde_x, kde_y, 'r-', linewidth=2)
-        
-        # Add title and labels
-        if title:
-            plt.title(title)
+            sns.histplot(df[column].dropna(), bins=bins, kde=True)
         else:
-            plt.title(f"Histogram of {column}")
+            plt.hist(df[column].dropna(), bins=bins, alpha=0.7)
         
+        # Set labels and title
         plt.xlabel(column)
-        plt.ylabel("Frequency" if not kde else "Density")
+        plt.ylabel('Frequency')
+        plt.title(title if title else f"Distribution of {column}")
         plt.grid(True, alpha=0.3)
-        
-        # Add mean and median lines
-        mean_val = df[column].mean()
-        median_val = df[column].median()
-        plt.axvline(mean_val, color='r', linestyle='--', linewidth=1.5, label=f'Mean: {mean_val:.2f}')
-        plt.axvline(median_val, color='g', linestyle='-.', linewidth=1.5, label=f'Median: {median_val:.2f}')
-        
-        # Add descriptive statistics
-        stats_text = f"Mean: {mean_val:.2f}\nMedian: {median_val:.2f}\nStd Dev: {df[column].std():.2f}"
-        plt.annotate(stats_text, xy=(0.05, 0.95), xycoords='axes fraction', 
-                     fontsize=10, bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
-                     verticalalignment='top')
-        
-        plt.legend()
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating histogram: {str(e)}")
+        plt.close()
+        return f"Error creating histogram: {str(e)}"
 
 
-
-def plot_bar(filename: str, x_column: str, y_column: str = None, aggfunc: str = 'count', 
-             horizontal: bool = False, title: str = None) -> Image:
+def plot_bar(file_path: str, x_column: str, y_column: str = None, 
+             aggfunc: str = "count", horizontal: bool = False, title: str = None) -> Image:
     """
     Create a bar chart from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         x_column: Column to use for bar categories
         y_column: Column to use for bar heights (optional, if None will count occurrences of x_column values)
         aggfunc: Aggregation function to use ('count', 'sum', 'mean', 'median', 'min', 'max')
@@ -224,124 +206,87 @@ def plot_bar(filename: str, x_column: str, y_column: str = None, aggfunc: str = 
     Returns:
         A bar chart image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
         # Check if columns exist
         if x_column not in df.columns:
-            raise ValueError(f"Column '{x_column}' not found in dataset.")
+            return f"Error: Column '{x_column}' not found in {filepath}."
         if y_column and y_column not in df.columns:
-            raise ValueError(f"Column '{y_column}' not found in dataset.")
+            return f"Error: Column '{y_column}' not found in {filepath}."
         
-        # Valid aggregation functions
-        valid_aggfuncs = ['count', 'sum', 'mean', 'median', 'min', 'max']
-        if aggfunc not in valid_aggfuncs:
-            raise ValueError(f"Invalid aggregation function. Choose from: {', '.join(valid_aggfuncs)}")
+        # Validate aggfunc
+        valid_aggs = ['count', 'sum', 'mean', 'median', 'min', 'max']
+        if aggfunc not in valid_aggs:
+            return f"Error: Invalid aggregation function. Choose from: {', '.join(valid_aggs)}"
         
-        # Create plot
-        plt.figure(figsize=(12, 6))
+        # Create the plot
+        plt.figure(figsize=(10, 6))
         
-        # Prepare data
         if y_column:
+            # Aggregate data
             if aggfunc == 'count':
                 data = df.groupby(x_column).size()
-            elif aggfunc == 'sum':
-                data = df.groupby(x_column)[y_column].sum()
-            elif aggfunc == 'mean':
-                data = df.groupby(x_column)[y_column].mean()
-            elif aggfunc == 'median':
-                data = df.groupby(x_column)[y_column].median()
-            elif aggfunc == 'min':
-                data = df.groupby(x_column)[y_column].min()
-            elif aggfunc == 'max':
-                data = df.groupby(x_column)[y_column].max()
+            else:
+                agg_dict = {
+                    'sum': np.sum,
+                    'mean': np.mean,
+                    'median': np.median,
+                    'min': np.min,
+                    'max': np.max
+                }
+                data = df.groupby(x_column)[y_column].agg(agg_dict[aggfunc])
         else:
-            # If no y_column, just count occurrences
+            # Just count occurrences
             data = df[x_column].value_counts()
         
-        # Sort data
-        data = data.sort_values()
+        # Sort data for better visualization
+        data = data.sort_values(ascending=horizontal)
         
-        # Plot horizontal or vertical bar chart
+        # Create horizontal or vertical bar chart
         if horizontal:
-            data.plot(kind='barh', ax=plt.gca(), color='skyblue')
+            data.plot(kind='barh')
         else:
-            data.plot(kind='bar', ax=plt.gca(), color='skyblue')
+            data.plot(kind='bar')
         
-        # Add title and labels
-        if title:
-            plt.title(title)
+        # Set labels and title
+        if y_column:
+            plt.ylabel(f"{aggfunc.capitalize()} of {y_column}")
+            plt_title = title if title else f"{aggfunc.capitalize()} of {y_column} by {x_column}"
         else:
-            if y_column:
-                plt.title(f"{aggfunc.capitalize()} of {y_column} by {x_column}")
-            else:
-                plt.title(f"Count of {x_column}")
+            plt.ylabel("Count")
+            plt_title = title if title else f"Count of {x_column}"
         
-        # Axis labels
-        if horizontal:
-            if y_column:
-                plt.xlabel(f"{aggfunc.capitalize()} of {y_column}")
-            else:
-                plt.xlabel("Count")
-            plt.ylabel(x_column)
-        else:
-            plt.xlabel(x_column)
-            if y_column:
-                plt.ylabel(f"{aggfunc.capitalize()} of {y_column}")
-            else:
-                plt.ylabel("Count")
-        
-        # Add data labels on bars
-        ax = plt.gca()
-        bars = ax.patches if horizontal else ax.containers[0]
-        
-        for bar in bars:
-            if horizontal:
-                width = bar.get_width()
-                x = bar.get_width() + (max(data) * 0.01)
-                y = bar.get_y() + bar.get_height() / 2
-                va = 'center'
-            else:
-                height = bar.get_height()
-                x = bar.get_x() + bar.get_width() / 2
-                y = bar.get_height() + (max(data) * 0.01)
-                va = 'bottom'
-            
-            value = width if horizontal else height
-            plt.annotate(f"{value:.1f}", (x, y), ha='center', va=va)
-        
+        plt.title(plt_title)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating bar chart: {str(e)}")
+        plt.close()
+        return f"Error creating bar chart: {str(e)}"
 
 
-def plot_line(filename: str, x_column: str, y_columns: List[str], title: str = None) -> Image:
+def plot_line(file_path: str, x_column: str, y_columns: List[str], title: str = None) -> Image:
     """
     Create a line plot from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         x_column: Column to use for x-axis
         y_columns: List of columns to plot as lines
         title: Custom title for the plot (optional)
@@ -349,168 +294,122 @@ def plot_line(filename: str, x_column: str, y_columns: List[str], title: str = N
     Returns:
         A line plot image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
         # Check if columns exist
         if x_column not in df.columns:
-            raise ValueError(f"Column '{x_column}' not found in dataset.")
+            return f"Error: Column '{x_column}' not found in {filepath}."
         
-        missing_columns = [col for col in y_columns if col not in df.columns]
-        if missing_columns:
-            raise ValueError(f"Columns not found in dataset: {', '.join(missing_columns)}")
+        missing_cols = [col for col in y_columns if col not in df.columns]
+        if missing_cols:
+            return f"Error: Columns not found: {', '.join(missing_cols)}"
         
-        # Create plot
-        plt.figure(figsize=(12, 6))
+        # Create the plot
+        plt.figure(figsize=(10, 6))
         
-        # Try to convert x to datetime if it looks like a date
-        try:
-            if df[x_column].dtype == 'object':
-                df[x_column] = pd.to_datetime(df[x_column])
-        except:
-            pass
+        for col in y_columns:
+            plt.plot(df[x_column], df[col], marker='o', linestyle='-', alpha=0.7, label=col)
         
-        # Sort by x column
-        df = df.sort_values(by=x_column)
-        
-        # Plot each y column
-        for column in y_columns:
-            plt.plot(df[x_column], df[column], marker='o', linestyle='-', label=column)
-        
-        # Add title and labels
-        if title:
-            plt.title(title)
-        else:
-            plt.title(f"Line Plot of {', '.join(y_columns)} vs {x_column}")
-        
+        # Set labels and title
         plt.xlabel(x_column)
         plt.ylabel("Value")
-        plt.grid(True, alpha=0.3)
+        plt.title(title if title else f"Line Plot: {', '.join(y_columns)} vs {x_column}")
         plt.legend()
-        
-        # Format x-axis if it's datetime
-        if pd.api.types.is_datetime64_dtype(df[x_column]):
-            plt.gcf().autofmt_xdate()
-        
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating line plot: {str(e)}")
+        plt.close()
+        return f"Error creating line plot: {str(e)}"
 
 
-
-def plot_correlation_matrix(filename: str, columns: List[str] = None, title: str = None) -> Image:
+def plot_correlation_matrix(file_path: str, columns: List[str] = None, title: str = None) -> Image:
     """
     Create a correlation matrix heatmap from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         columns: List of columns to include (if None, uses all numeric columns)
         title: Custom title for the plot (optional)
         
     Returns:
         A correlation matrix heatmap image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
-        # If columns not specified, use all numeric columns
-        if not columns:
-            columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        # Filter to numeric columns if not specified
+        if columns is None:
+            numeric_df = df.select_dtypes(include=['number'])
+            if numeric_df.empty:
+                return "Error: No numeric columns found in the dataset."
         else:
-            # Check if specified columns exist and are numeric
-            missing_columns = [col for col in columns if col not in df.columns]
-            if missing_columns:
-                raise ValueError(f"Columns not found in dataset: {', '.join(missing_columns)}")
+            # Check if specified columns exist
+            missing_cols = [col for col in columns if col not in df.columns]
+            if missing_cols:
+                return f"Error: Columns not found: {', '.join(missing_cols)}"
             
-            # Filter non-numeric columns
+            # Check if specified columns are numeric
             non_numeric = [col for col in columns if not pd.api.types.is_numeric_dtype(df[col])]
             if non_numeric:
-                raise ValueError(f"Non-numeric columns cannot be used in correlation matrix: {', '.join(non_numeric)}")
-        
-        if len(columns) < 2:
-            raise ValueError("At least two numeric columns are required for a correlation matrix")
+                return f"Error: Non-numeric columns: {', '.join(non_numeric)}"
+            
+            numeric_df = df[columns]
         
         # Calculate correlation matrix
-        corr_matrix = df[columns].corr()
+        corr_matrix = numeric_df.corr()
         
-        # Create plot
-        plt.figure(figsize=(max(8, len(columns) * 0.7), max(6, len(columns) * 0.7)))
+        # Create the plot
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1, center=0,
+                   linewidths=0.5, square=True)
         
-        # Create heatmap
-        im = plt.imshow(corr_matrix, cmap='coolwarm', vmin=-1, vmax=1)
-        
-        # Add colorbar
-        plt.colorbar(im, label='Correlation Coefficient')
-        
-        # Add title
-        if title:
-            plt.title(title)
-        else:
-            plt.title("Correlation Matrix")
-        
-        # Add labels for each cell
-        for i in range(len(columns)):
-            for j in range(len(columns)):
-                text = f"{corr_matrix.iloc[i, j]:.2f}"
-                plt.annotate(text, xy=(j, i), ha='center', va='center',
-                             color='white' if abs(corr_matrix.iloc[i, j]) > 0.5 else 'black')
-        
-        # Set ticks and labels
-        plt.xticks(range(len(columns)), columns, rotation=45, ha='right')
-        plt.yticks(range(len(columns)), columns)
-        
+        # Set title
+        plt.title(title if title else "Correlation Matrix")
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating correlation matrix: {str(e)}")
+        plt.close()
+        return f"Error creating correlation matrix: {str(e)}"
 
 
-
-def plot_box(filename: str, columns: List[str], by_column: str = None, title: str = None) -> Image:
+def plot_box(file_path: str, columns: List[str], by_column: str = None, title: str = None) -> Image:
     """
     Create box plots from a dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         columns: List of numeric columns to create box plots for
         by_column: Optional column to group by (creates separate box plots for each group)
         title: Custom title for the plot (optional)
@@ -518,92 +417,159 @@ def plot_box(filename: str, columns: List[str], by_column: str = None, title: st
     Returns:
         A box plot image
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        raise ValueError(f"File {filename} not found.")
+        return f"Error: File {filepath} not found."
     
     try:
+        # Load the data
         df = pd.read_csv(filepath)
         
-        # Check if columns exist and are numeric
-        missing_columns = [col for col in columns if col not in df.columns]
-        if missing_columns:
-            raise ValueError(f"Columns not found in dataset: {', '.join(missing_columns)}")
-        
-        non_numeric = [col for col in columns if not pd.api.types.is_numeric_dtype(df[col])]
-        if non_numeric:
-            raise ValueError(f"Non-numeric columns cannot be used for box plots: {', '.join(non_numeric)}")
+        # Check if columns exist
+        missing_cols = [col for col in columns if col not in df.columns]
+        if missing_cols:
+            return f"Error: Columns not found: {', '.join(missing_cols)}"
         
         # Check if by_column exists
         if by_column and by_column not in df.columns:
-            raise ValueError(f"Column '{by_column}' not found in dataset.")
+            return f"Error: By-column '{by_column}' not found in {filepath}."
         
-        # Determine plot size and layout
+        # Check if columns are numeric
+        non_numeric = [col for col in columns if not pd.api.types.is_numeric_dtype(df[col])]
+        if non_numeric:
+            return f"Error: Non-numeric columns: {', '.join(non_numeric)}"
+        
+        # Create the plot
         if by_column:
-            # One row per column, with box plots for each category
-            n_groups = df[by_column].nunique()
-            if n_groups > 10:
-                raise ValueError(f"Too many groups in '{by_column}' (max 10 supported)")
-            
-            fig, axes = plt.subplots(len(columns), 1, figsize=(max(10, n_groups * 1.5), len(columns) * 4))
-            if len(columns) == 1:
-                axes = [axes]  # Make it iterable if only one subplot
-            
-            for i, column in enumerate(columns):
-                # Create notched box plot (notch around median shows confidence interval)
-                df.boxplot(column=column, by=by_column, ax=axes[i], notch=True, 
-                           patch_artist=True, return_type='dict')
-                
-                axes[i].set_title(f"Box Plot of {column} by {by_column}")
-                axes[i].set_ylabel(column)
-                
-                # Add individual points as a scatter plot for more detail
-                categories = df[by_column].unique()
-                for j, category in enumerate(categories):
-                    subset = df[df[by_column] == category][column].dropna()
-                    # Add jitter to x position
-                    x = [j + 1 + (np.random.random() - 0.5) * 0.25 for _ in range(len(subset))]
-                    axes[i].scatter(x, subset, alpha=0.5, marker='o', s=20, color='black')
-            
-            # Remove the "by_column" text at the top of the figure
-            plt.suptitle("")
-            
-        else:
-            # No grouping, create one row of box plots
-            plt.figure(figsize=(max(8, len(columns) * 2.5), 8))
-            
-            boxplot = df[columns].boxplot(notch=True, patch_artist=True, return_type='dict')
-            
-            # Add individual points for each column
-            for i, column in enumerate(columns):
-                data = df[column].dropna()
-                # Add jitter to x position
-                x = [i + 1 + (np.random.random() - 0.5) * 0.25 for _ in range(len(data))]
-                plt.scatter(x, data, alpha=0.5, marker='o', s=20, color='black')
-        
-        # Add overall title if provided
-        if title:
-            if by_column:
-                fig.suptitle(title, y=1.02)
+            # Create a single plot for each numeric column, grouped by by_column
+            if len(columns) > 1:
+                fig, axes = plt.subplots(len(columns), 1, figsize=(10, 5*len(columns)))
+                for i, col in enumerate(columns):
+                    df.boxplot(column=col, by=by_column, ax=axes[i])
+                    axes[i].set_title(f"Box Plot: {col} by {by_column}")
+                    axes[i].set_ylabel(col)
             else:
-                plt.title(title)
+                plt.figure(figsize=(10, 6))
+                df.boxplot(column=columns[0], by=by_column)
+                plt.title(f"Box Plot: {columns[0]} by {by_column}")
+                plt.ylabel(columns[0])
+        else:
+            # Create a single plot with all numeric columns
+            plt.figure(figsize=(10, 6))
+            df.boxplot(column=columns)
+            plt.title(title if title else "Box Plot")
+            plt.ylabel("Value")
         
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
-        # Save plot to bytes
-        buf = BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
+        # Convert plot to image
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format='png')
         plt.close()
-        buf.seek(0)
         
-        # Return as Image
-        return Image(data=buf.getvalue(), format="png")
+        # Create and return image
+        img_data = img_buf.getvalue()
+        return Image(data=img_data, format="png")
     
     except Exception as e:
-        plt.close()  # Ensure figure is closed even on error
-        raise ValueError(f"Error creating box plot: {str(e)}")
+        plt.close()
+        return f"Error creating box plot: {str(e)}"
+
+
+def get_correlation(file_path: str, column1: str, column2: str) -> str:
+    """
+    Calculate the correlation between two numeric columns in a dataset.
+    
+    Args:
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
+        column1: First column name
+        column2: Second column name
+        
+    Returns:
+        Correlation coefficient and interpretation
+    """
+    filepath = resolve_file_path(file_path, '.csv')
+    
+    if not filepath.exists():
+        return f"Error: File {filepath} not found."
+    
+    try:
+        # Load the data
+        df = pd.read_csv(filepath)
+        
+        # Check if columns exist
+        if column1 not in df.columns:
+            return f"Error: Column '{column1}' not found in {filepath}."
+        if column2 not in df.columns:
+            return f"Error: Column '{column2}' not found in {filepath}."
+        
+        # Check if columns are numeric
+        if not pd.api.types.is_numeric_dtype(df[column1]):
+            return f"Error: Column '{column1}' is not numeric."
+        if not pd.api.types.is_numeric_dtype(df[column2]):
+            return f"Error: Column '{column2}' is not numeric."
+        
+        # Calculate correlation
+        correlation = df[column1].corr(df[column2])
+        
+        # Interpret correlation
+        if abs(correlation) < 0.1:
+            interpretation = "negligible or no"
+        elif abs(correlation) < 0.3:
+            interpretation = "weak"
+        elif abs(correlation) < 0.5:
+            interpretation = "moderate"
+        elif abs(correlation) < 0.7:
+            interpretation = "moderately strong"
+        elif abs(correlation) < 0.9:
+            interpretation = "strong"
+        else:
+            interpretation = "very strong"
+        
+        direction = "positive" if correlation > 0 else "negative"
+        
+        result = f"# Correlation Analysis: {column1} vs {column2}\n\n"
+        result += f"**File Path**: {filepath}\n\n"
+        result += f"Correlation coefficient: **{correlation:.4f}**\n\n"
+        
+        if abs(correlation) < 0.1:
+            result += f"There is {interpretation} correlation between {column1} and {column2}."
+        else:
+            result += f"There is a {interpretation} {direction} correlation between {column1} and {column2}.\n\n"
+        
+        if correlation > 0:
+            result += f"This means that as {column1} increases, {column2} tends to increase as well."
+        elif correlation < 0:
+            result += f"This means that as {column1} increases, {column2} tends to decrease."
+        
+        # Add explanation of statistical significance
+        n = len(df[[column1, column2]].dropna())
+        if n > 0:
+            result += f"\n\nThis correlation is based on {n} observations."
+            
+            if n >= 30:
+                # Simplified estimation of significance using Fisher transformation
+                # For large sample sizes, we can use the Fisher transformation to test significance
+                import math
+                r = correlation
+                z = 0.5 * math.log((1+r)/(1-r))
+                std_error = 1/math.sqrt(n-3)
+                p_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z/std_error)/math.sqrt(2))))
+                
+                if p_value < 0.001:
+                    significance = "highly statistically significant (p < 0.001)"
+                elif p_value < 0.01:
+                    significance = "statistically significant (p < 0.01)"
+                elif p_value < 0.05:
+                    significance = "statistically significant (p < 0.05)"
+                else:
+                    significance = f"not statistically significant (p = {p_value:.3f})"
+                
+                result += f"\nThe correlation is {significance}."
+        
+        return result
+    
+    except Exception as e:
+        return f"Error calculating correlation: {str(e)}"

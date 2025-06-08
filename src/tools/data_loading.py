@@ -51,36 +51,60 @@ def initialize(mcp_instance: FastMCP, data_dir: Path):
     mcp_instance.add_tool(upload_csv)
     
     # Register resource using the decorator syntax
-    @mcp_instance.resource("csv://{filename}")
-    def csv_resource_handler(filename: str):
-        return get_csv_data(filename)
+    @mcp_instance.resource("csv://{file_path}")
+    def csv_resource_handler(file_path: str):
+        return get_csv_data(file_path)
 
-def load_csv(filename: str, ctx: Context) -> str:
+
+def resolve_file_path(file_path: str, ensure_extension: str = None) -> Path:
+    """
+    Resolve a file path, supporting both relative (to DATA_DIR) and absolute paths.
+    
+    Args:
+        file_path: File path or name
+        ensure_extension: Optional extension to add if missing (e.g. '.csv')
+        
+    Returns:
+        Resolved Path object
+    """
+    path = Path(file_path)
+    
+    # If only a filename was provided (no parent directory or relative path), use DATA_DIR
+    if not path.is_absolute() and (not path.parent or str(path.parent) == '.'):
+        resolved_path = DATA_DIR / path.name
+    else:
+        # Use the provided path as is (absolute or relative to current directory)
+        resolved_path = path
+    
+    # Ensure filename has the specified extension
+    if ensure_extension and not resolved_path.name.lower().endswith(ensure_extension.lower()):
+        resolved_path = Path(f"{resolved_path}{ensure_extension}")
+    
+    return resolved_path
+
+
+def load_csv(file_path: str, ctx: Context) -> str:
     """
     Load a CSV file and make it available as a resource.
     
     Args:
-        filename: Name of the CSV file (with or without .csv extension)
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR, with or without .csv extension)
     
     Returns:
         A message confirming the file was loaded
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     # Check if file exists
     if not filepath.exists():
-        return f"Error: File {filename} not found in the data directory."
+        return f"Error: File {filepath} not found."
     
     try:
         # Load the data
         df = pd.read_csv(filepath)
         
         # Store file info in our state management
-        set_user_data(f"csv_{filename}", {
+        set_user_data(f"csv_{filepath.name}", {
             "path": str(filepath),
             "columns": list(df.columns),
             "rows": len(df),
@@ -89,37 +113,33 @@ def load_csv(filename: str, ctx: Context) -> str:
         
         # Set as active dataset
         set_user_data("active_dataset", {
-            "name": filename,
+            "name": filepath.name,
             "path": str(filepath),
             "columns": list(df.columns),
             "rows": len(df)
         })
         
         # Return success message with file info
-        return f"Successfully loaded {filename} with {len(df)} rows and {len(df.columns)} columns: {', '.join(df.columns)}"
+        return f"Successfully loaded {filepath.name} from {filepath} with {len(df)} rows and {len(df.columns)} columns: {', '.join(df.columns)}"
     
     except Exception as e:
         return f"Error loading CSV: {str(e)}"
 
 
-def get_csv_data(filename: str) -> str:
+def get_csv_data(file_path: str) -> str:
     """
     Access a CSV file as a resource.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         
     Returns:
         CSV data as a formatted string
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     try:
         df = pd.read_csv(filepath)
@@ -128,7 +148,8 @@ def get_csv_data(filename: str) -> str:
         
         # Add summary statistics
         summary = f"""
-# CSV Data: {filename}
+# CSV Data: {filepath.name}
+Path: {filepath}
 Shape: {df.shape[0]} rows × {df.shape[1]} columns
 
 ## Preview (first 10 rows):
@@ -157,9 +178,9 @@ def list_datasets(ctx: Context) -> str:
             return "No datasets found in the data directory."
         
         # Format the list with basic information
-        result = "# Available Datasets\n\n"
-        result += "| Filename | Rows | Columns | Last Accessed |\n"
-        result += "|----------|------|---------|---------------|\n"
+        result = "# Available Datasets in Data Directory\n\n"
+        result += "| Filename | Path | Rows | Columns | Last Accessed |\n"
+        result += "|----------|------|------|---------|---------------|\n"
         
         for file_path in csv_files:
             filename = file_path.name
@@ -172,6 +193,7 @@ def list_datasets(ctx: Context) -> str:
                 rows = file_info.get("rows", "?")
                 columns = len(file_info.get("columns", []))
                 last_accessed = file_info.get("last_accessed", "Never")
+                path = file_info.get("path", str(file_path))
             else:
                 # Read file to get info
                 try:
@@ -179,17 +201,23 @@ def list_datasets(ctx: Context) -> str:
                     rows = len(df)
                     columns = len(df.columns)
                     last_accessed = "Not previously accessed"
+                    path = str(file_path)
                 except:
                     rows = "?"
                     columns = "?"
                     last_accessed = "Error reading file"
+                    path = str(file_path)
             
-            result += f"| {filename} | {rows} | {columns} | {last_accessed} |\n"
+            result += f"| {filename} | {path} | {rows} | {columns} | {last_accessed} |\n"
         
         # Add note about active dataset if there is one
         active_dataset = get_user_data("active_dataset", None)
         if active_dataset:
             result += f"\nActive dataset: **{active_dataset.get('name', '')}**\n"
+            result += f"Path: **{active_dataset.get('path', '')}**\n"
+        
+        # Add note about using full paths
+        result += "\n**Note:** You can load datasets using full paths with the `load_csv` tool, example: `load_csv('/path/to/your/dataset.csv')`\n"
         
         return result
     
@@ -197,24 +225,20 @@ def list_datasets(ctx: Context) -> str:
         return f"Error listing datasets: {str(e)}"
 
 
-def get_dataset_info(filename: str, ctx: Context) -> str:
+def get_dataset_info(file_path: str, ctx: Context) -> str:
     """
     Get detailed information about a specific dataset.
     
     Args:
-        filename: Name of the CSV file
+        file_path: Path to the CSV file (absolute or relative to DATA_DIR)
         
     Returns:
         Detailed information about the dataset
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: File {filename} not found."
+        return f"Error: File {filepath} not found."
     
     try:
         # Load the data
@@ -226,8 +250,8 @@ def get_dataset_info(filename: str, ctx: Context) -> str:
         size_mb = size_kb / 1024
         
         # Format file info
-        result = f"# Dataset Information: {filename}\n\n"
-        result += f"- **Filename**: {filename}\n"
+        result = f"# Dataset Information\n\n"
+        result += f"- **Filename**: {filepath.name}\n"
         result += f"- **Path**: {filepath}\n"
         result += f"- **Size**: {size_kb:.2f} KB ({size_mb:.2f} MB)\n"
         result += f"- **Rows**: {len(df)}\n"
@@ -252,7 +276,7 @@ def get_dataset_info(filename: str, ctx: Context) -> str:
             result += f"| {col} | {col_dtype} | {non_null} ({non_null_pct:.1f}%) | {mem_str} |\n"
         
         # Update our state management with file info
-        set_user_data(f"csv_{filename}", {
+        set_user_data(f"csv_{filepath.name}", {
             "path": str(filepath),
             "columns": list(df.columns),
             "rows": len(df),
@@ -265,29 +289,28 @@ def get_dataset_info(filename: str, ctx: Context) -> str:
         return f"Error getting dataset info: {str(e)}"
 
 
-def save_csv(data: Any, filename: str, overwrite: bool = False) -> str:
+def save_csv(data: Any, file_path: str, overwrite: bool = False) -> str:
     """
-    Save data to a CSV file in the data directory.
+    Save data to a CSV file.
     
     Args:
         data: DataFrame or data that can be converted to a DataFrame
-        filename: Name of the CSV file to save
+        file_path: Path to save the CSV file (absolute or relative to DATA_DIR)
         overwrite: Whether to overwrite an existing file
         
     Returns:
         Confirmation message
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     # Check if file exists and we're not overwriting
     if filepath.exists() and not overwrite:
-        return f"Error: File {filename} already exists. Set overwrite=True to replace it."
+        return f"Error: File {filepath} already exists. Set overwrite=True to replace it."
     
     try:
+        # Create parent directories if they don't exist
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
         # Convert to DataFrame if not already
         if not isinstance(data, pd.DataFrame):
             df = pd.DataFrame(data)
@@ -297,35 +320,34 @@ def save_csv(data: Any, filename: str, overwrite: bool = False) -> str:
         # Save to CSV
         df.to_csv(filepath, index=False)
         
-        return f"Successfully saved {filename} with {len(df)} rows and {len(df.columns)} columns."
+        return f"Successfully saved {filepath.name} to {filepath} with {len(df)} rows and {len(df.columns)} columns."
     
     except Exception as e:
         return f"Error saving CSV: {str(e)}"
 
 
-def upload_csv(content: str, filename: str, overwrite: bool = False) -> str:
+def upload_csv(content: str, file_path: str, overwrite: bool = False) -> str:
     """
-    Upload CSV content as a new file in the data directory.
+    Upload CSV content as a new file.
     
     Args:
         content: CSV content as a string
-        filename: Name of the CSV file to create
+        file_path: Path to save the CSV file (absolute or relative to DATA_DIR)
         overwrite: Whether to overwrite an existing file
         
     Returns:
         Confirmation message
     """
-    # Ensure filename has .csv extension
-    if not filename.endswith('.csv'):
-        filename += '.csv'
-    
-    filepath = DATA_DIR / filename
+    filepath = resolve_file_path(file_path, '.csv')
     
     # Check if file exists and we're not overwriting
     if filepath.exists() and not overwrite:
-        return f"Error: File {filename} already exists. Set overwrite=True to replace it."
+        return f"Error: File {filepath} already exists. Set overwrite=True to replace it."
     
     try:
+        # Create parent directories if they don't exist
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
         # Write content to file
         with open(filepath, 'w') as f:
             f.write(content)
@@ -333,7 +355,7 @@ def upload_csv(content: str, filename: str, overwrite: bool = False) -> str:
         # Verify by loading
         df = pd.read_csv(filepath)
         
-        return f"Successfully uploaded {filename} with {len(df)} rows and {len(df.columns)} columns."
+        return f"Successfully uploaded {filepath.name} to {filepath} with {len(df)} rows and {len(df.columns)} columns."
     
     except Exception as e:
         return f"Error uploading CSV: {str(e)}"

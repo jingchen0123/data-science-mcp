@@ -12,6 +12,7 @@ import io
 import sys
 import traceback
 from pathlib import Path
+import os
 from typing import Optional, Dict, List, Any, Union
 
 # The DATA_DIR will be initialized by the main server module
@@ -40,25 +41,50 @@ def initialize(mcp_instance: FastMCP, data_dir: Path):
     mcp_instance.add_tool(get_code)
     mcp_instance.add_tool(save_code)
 
-def generate_analysis_code(request: str, dataset_name: str, ctx: Context) -> str:
+
+def resolve_file_path(file_path: str, ensure_extension: str = None) -> Path:
+    """
+    Resolve a file path, supporting both relative (to DATA_DIR) and absolute paths.
+    
+    Args:
+        file_path: File path or name
+        ensure_extension: Optional extension to add if missing (e.g. '.csv')
+        
+    Returns:
+        Resolved Path object
+    """
+    path = Path(file_path)
+    
+    # If only a filename was provided (no parent directory or relative path), use DATA_DIR
+    if not path.is_absolute() and (not path.parent or str(path.parent) == '.'):
+        resolved_path = DATA_DIR / path.name
+    else:
+        # Use the provided path as is (absolute or relative to current directory)
+        resolved_path = path
+    
+    # Ensure filename has the specified extension
+    if ensure_extension and not resolved_path.name.lower().endswith(ensure_extension.lower()):
+        resolved_path = Path(f"{resolved_path}{ensure_extension}")
+    
+    return resolved_path
+
+
+def generate_analysis_code(request: str, dataset_path: str, ctx: Context) -> str:
     """
     Generate Python code for data analysis based on a natural language request.
     
     Args:
         request: Natural language description of the analysis to perform
-        dataset_name: Name of the dataset to analyze
+        dataset_path: Path to the dataset to analyze (absolute or relative to DATA_DIR)
         
     Returns:
         Generated Python code as a string
     """
-    # Ensure dataset_name has .csv extension
-    if not dataset_name.endswith('.csv'):
-        dataset_name += '.csv'
-    
-    filepath = DATA_DIR / dataset_name
+    # Resolve file path
+    filepath = resolve_file_path(dataset_path, '.csv')
     
     if not filepath.exists():
-        return f"Error: Dataset '{dataset_name}' not found."
+        return f"Error: Dataset '{filepath}' not found."
     
     try:
         # Load the dataset to inspect columns
@@ -72,9 +98,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# Load the dataset
+# Define data paths
 DATA_DIR = Path("{DATA_DIR}")
-df = pd.read_csv(DATA_DIR / "{dataset_name}")
+DATASET_PATH = Path("{filepath}")
+
+# Load the dataset
+df = pd.read_csv(DATASET_PATH)
 
 """
         
@@ -111,6 +140,7 @@ for col in numeric_cols:
 
         elif "summary" in request.lower() or "statistics" in request.lower():
             code += f"""# Generate summary statistics
+print(f"Dataset Path: {{DATASET_PATH}}")
 print("Basic Information:")
 print(f"Shape: {{df.shape[0]}} rows × {{df.shape[1]}} columns")
 print("\\nColumn Data Types:")
@@ -284,6 +314,7 @@ else:
         else:
             # Default to a general exploratory analysis
             code += f"""# General exploratory analysis
+print("Dataset Path:", DATASET_PATH)
 print("Dataset Overview:")
 print(df.head())
 
@@ -373,23 +404,22 @@ def execute_code(code_id: str = None, code: str = None, ctx: Context = None) -> 
             'DATA_DIR': DATA_DIR
         }
         
-        # *** NEW CODE: Fix file path references ***
+        # Fix file path references in the code
         import re
         
         # Patterns to detect and fix
         fix_patterns = [
+            # Handle pd.read_csv('file.csv') pattern
             (r"pd\.read_csv\(['\"]([^/\\][^'\"]+\.csv)['\"]", r"pd.read_csv(DATA_DIR / '\1'"),
-            (r"pd\.read_excel\(['\"]([^/\\][^'\"]+\.xlsx)['\"]", r"pd.read_excel(DATA_DIR / '\1'"),
-            (r"pd\.read_parquet\(['\"]([^/\\][^'\"]+\.parquet)['\"]", r"pd.read_parquet(DATA_DIR / '\1'"),
-            (r"open\(['\"]([^/\\][^'\"]+\.[^'\"]+)['\"]", r"open(DATA_DIR / '\1'"),
             
-            (r"plt\.savefig\(['\"]([^/\\][^'\"]+\.[^'\"]+)['\"]", r"plt.savefig(DATA_DIR / '\1'"),
-            (r"\.to_csv\(['\"]([^/\\][^'\"]+\.csv)['\"]", r".to_csv(DATA_DIR / '\1'"),
-            (r"\.to_excel\(['\"]([^/\\][^'\"]+\.xlsx)['\"]", r".to_excel(DATA_DIR / '\1'"),
-            (r"\.to_parquet\(['\"]([^/\\][^'\"]+\.parquet)['\"]", r".to_parquet(DATA_DIR / '\1'"),
-            (r"np\.save\(['\"]([^/\\][^'\"]+\.npy)['\"]", r"np.save(DATA_DIR / '\1'"),
-            (r"joblib\.dump\(.*?,\s*['\"]([^/\\][^'\"]+\.[^'\"]+)['\"]", r"joblib.dump(\1, DATA_DIR / '\2'"),
-            (r"pickle\.dump\(.*?,\s*open\(['\"]([^/\\][^'\"]+\.[^'\"]+)['\"]", r"pickle.dump(\1, open(DATA_DIR / '\2'")
+            # Handle pd.read_excel('file.xlsx') pattern
+            (r"pd\.read_excel\(['\"]([^/\\][^'\"]+\.xlsx)['\"]", r"pd.read_excel(DATA_DIR / '\1'"),
+            
+            # Handle pd.read_parquet('file.parquet') pattern
+            (r"pd\.read_parquet\(['\"]([^/\\][^'\"]+\.parquet)['\"]", r"pd.read_parquet(DATA_DIR / '\1'"),
+            
+            # Handle open('file.txt', 'r') pattern
+            (r"open\(['\"]([^/\\][^'\"]+\.[^'\"]+)['\"]", r"open(DATA_DIR / '\1'"),
         ]
         
         modified_code = code_to_execute
@@ -400,7 +430,6 @@ def execute_code(code_id: str = None, code: str = None, ctx: Context = None) -> 
         print("### Code Transformation Applied ###")
         if modified_code != code_to_execute:
             print("Original file references were automatically corrected to use DATA_DIR.")
-        # *** END NEW CODE ***
         
         # Replace plt.show() with code to save figures
         modified_code = modified_code.replace("plt.show()", "")
@@ -472,13 +501,13 @@ def get_code(code_id: str, ctx: Context) -> str:
     return f"Code (ID: {code_id}):\n\n```python\n{code}\n```"
 
 
-def save_code(code_id: str, filename: str, ctx: Context) -> str:
+def save_code(code_id: str, file_path: str, ctx: Context) -> str:
     """
     Save generated code to a file.
     
     Args:
         code_id: ID of the code to save
-        filename: Name of the file to save the code to
+        file_path: Path to save the code file (absolute or relative to DATA_DIR)
         
     Returns:
         Confirmation message
@@ -488,13 +517,14 @@ def save_code(code_id: str, filename: str, ctx: Context) -> str:
     
     code = _code_store[code_id]
     
-    # Ensure filename has .py extension
-    if not filename.endswith('.py'):
-        filename += '.py'
-    
-    filepath = DATA_DIR / filename
+    # Resolve file path
+    filepath = resolve_file_path(file_path, '.py')
     
     try:
+        # Create parent directories if they don't exist
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write code to file
         with open(filepath, 'w') as f:
             f.write(code)
         
